@@ -1,5 +1,7 @@
 github.com/molikatty/spinlock v0.0.0-20230208051519-c60bba696cfa h1:7pvUgOdWQC7htzZnkcb+ekQP/A37/IFWvzsEVVzSLWA=
 github.com/molikatty/spinlock v0.0.0-20230208051519-c60bba696cfa/go.mod h1:Sm0oPVMwvb24XwnTAcjKDdP/dwXEgG/70LfVDXyq0PY=
+github.com/molikatty/spinlock v0.0.0-20230208051637-901da74fa652 h1:dD3c2LdFWncdOuNtdqSnEiC7bvmjDtlbsw9d27gjh68=
+github.com/molikatty/spinlock v0.0.0-20230208051637-901da74fa652/go.mod h1:Sm0oPVMwvb24XwnTAcjKDdP/dwXEgG/70LfVDXyq0PY=
 github.com/panjf2000/ants v1.3.0 h1:8pQ+8leaLc9lys2viEEr8md0U4RN6uOSUCE9bOYjQ9M=
 github.com/panjf2000/ants v1.3.0/go.mod h1:AaACblRPzq35m1g3enqYcxspbbiOJJYaxU2wMpm1cXY=
 github.com/wazsmwazsm/mortar v1.5.2 h1:K5zqqOELSq6FSLDsFvLRQNBGhRWyJJn7pwVfPnR8HlQ=

@@ -14,8 +14,8 @@ const (
 )
 
 const (
-	n = 1e5
-	t = 10
+	n = 1e7
+	t = 100
 )
 
 var curMem uint64
@@ -40,7 +40,7 @@ func TestGoroutines(t *testing.T) {
 	t.Logf("memory usage:%d MB", curMem)
 }
 
-func TestMolix(t *testing.T) {
+func TestDefaultMolix(t *testing.T) {
 	var g sync.WaitGroup
 	defer Stop()
 	for i := 0; i < n; i++ {
@@ -54,6 +54,27 @@ func TestMolix(t *testing.T) {
 	t.Logf("pool MTask capacity %d", Cap())
 	t.Logf("pool running task %d", Running())
 	t.Logf("pool free task %d", Free())
+	mem := runtime.MemStats{}
+	runtime.ReadMemStats(&mem)
+	curMem = mem.TotalAlloc/MiB - curMem
+	t.Logf("memory usage:%d MB", curMem)
+}
+
+func TestMolix(t *testing.T) {
+	var g sync.WaitGroup
+	mp, _ := NewMPool(2e5)
+	defer Stop()
+	for i := 0; i < n; i++ {
+		g.Add(1)
+		mp.Submit(func() {
+			demoFunc()
+			g.Done()
+		})
+	}
+	g.Wait()
+	t.Logf("pool MTask capacity %d", mp.Cap())
+	t.Logf("pool running task %d", mp.Running())
+	t.Logf("pool free task %d", mp.Free())
 	mem := runtime.MemStats{}
 	runtime.ReadMemStats(&mem)
 	curMem = mem.TotalAlloc/MiB - curMem

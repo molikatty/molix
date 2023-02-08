@@ -31,7 +31,7 @@ type MPool struct {
 	runnings    int32
 	PanicHandle func(v interface{})
 	status      Status
-	spin           sync.Locker
+	spin        sync.Locker
 	once        sync.Once
 	cond        sync.Cond
 }
@@ -45,10 +45,9 @@ func NewMPool(size int32) (*MPool, error) {
 		status:   RUNNING,
 		capacity: size,
 		tasks:    make([]*MTask, 0, 1),
-		spin:        spinlock.NewSpinLock(),
+		spin:     spinlock.NewLock(),
 	}
 	mp.cond = *sync.NewCond(mp.spin)
-
 
 	return mp, nil
 }
@@ -113,15 +112,16 @@ func (m *MPool) getMTask() (mt *MTask) {
 		mt = m.makeMTask()
 		mt.run()
 	} else {
-	again:
-		m.cond.Wait()
-		if m.isStoped() {
-			m.spin.Unlock()
-			return
-		}
+		for {
+			m.cond.Wait()
+			if m.isStoped() {
+				m.spin.Unlock()
+				return
+			}
 
-		if mt = m.detach(); mt == nil {
-			goto again
+			if mt = m.detach(); mt != nil {
+				break
+			}
 		}
 		m.spin.Unlock()
 	}
@@ -129,16 +129,17 @@ func (m *MPool) getMTask() (mt *MTask) {
 	return
 }
 
-func (m *MPool) detach() *MTask {
+func (m *MPool) detach() (mt *MTask) {
 	n := len(m.tasks)
 	if n == 0 {
 		return nil
 	}
 
-	mt := m.tasks[n-1]
+	mt = m.tasks[n-1]
 	m.tasks[n-1] = nil
 	m.tasks = m.tasks[:n-1]
-	return mt
+
+	return
 }
 
 func (m *MPool) insert(mt *MTask) bool {
@@ -148,9 +149,9 @@ func (m *MPool) insert(mt *MTask) bool {
 	}
 
 	m.spin.Lock()
-	defer m.spin.Unlock()
 	m.tasks = append(m.tasks, mt)
 	m.cond.Signal()
+	m.spin.Unlock()
 
 	return true
 }
