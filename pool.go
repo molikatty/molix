@@ -4,7 +4,8 @@ import (
 	"errors"
 	"sync"
 	"sync/atomic"
-	"time"
+
+	"github.com/molikatty/spinlock"
 )
 
 type Status int32
@@ -25,13 +26,12 @@ type MTask struct {
 }
 
 type MPool struct {
+	tasks       []*MTask
 	capacity    int32
 	runnings    int32
-	tasks       []*MTask
 	PanicHandle func(v interface{})
-	p           *sync.Pool
 	status      Status
-	l           sync.Mutex
+	spin           sync.Locker
 	once        sync.Once
 	cond        sync.Cond
 }
@@ -44,17 +44,11 @@ func NewMPool(size int32) (*MPool, error) {
 	mp := &MPool{
 		status:   RUNNING,
 		capacity: size,
+		tasks:    make([]*MTask, 0, 1),
+		spin:        spinlock.NewSpinLock(),
 	}
-	mp.cond = *sync.NewCond(&mp.l)
+	mp.cond = *sync.NewCond(mp.spin)
 
-	mp.p = &sync.Pool{
-		New: func() interface{} {
-			return &MTask{
-				p:  mp,
-				mt: make(chan func(), 1),
-			}
-		},
-	}
 
 	return mp, nil
 }
@@ -67,12 +61,21 @@ func (m *MPool) decRunnins() {
 	atomic.AddInt32(&m.runnings, -1)
 }
 
-func (m *MPool) GetRunnings() int {
+func (m *MPool) Running() int {
 	return int(atomic.LoadInt32(&m.runnings))
 }
 
-func (m *MPool) GetCap() int {
+func (m *MPool) Cap() int {
 	return int(m.capacity)
+}
+
+func (m *MPool) Free() int {
+	c := m.Cap()
+	if c < 0 {
+		return -1
+	}
+
+	return c - m.Running()
 }
 
 func (m *MPool) isStoped() bool {
@@ -93,26 +96,37 @@ func (m *MPool) Submit(t func()) error {
 	return nil
 }
 
-func (m *MPool) getMTask() *MTask {
-	var mt *MTask
-	m.l.Lock()
+func (m *MPool) makeMTask() *MTask {
+	return &MTask{
+		p:  m,
+		mt: make(chan func(), 1),
+	}
+}
+
+func (m *MPool) getMTask() (mt *MTask) {
+	m.spin.Lock()
 
 	if mt = m.detach(); mt != nil {
-		m.l.Unlock()
-	} else if m.GetCap() > m.GetRunnings() {
-		m.l.Unlock()
-		mt = m.p.Get().(*MTask)
+		m.spin.Unlock()
+	} else if m.Free() > 0 {
+		m.spin.Unlock()
+		mt = m.makeMTask()
 		mt.run()
 	} else {
 	again:
 		m.cond.Wait()
+		if m.isStoped() {
+			m.spin.Unlock()
+			return
+		}
+
 		if mt = m.detach(); mt == nil {
 			goto again
 		}
-		m.l.Unlock()
+		m.spin.Unlock()
 	}
 
-	return mt
+	return
 }
 
 func (m *MPool) detach() *MTask {
@@ -132,8 +146,9 @@ func (m *MPool) insert(mt *MTask) bool {
 		m.cond.Broadcast()
 		return false
 	}
-	m.l.Lock()
-	defer m.l.Unlock()
+
+	m.spin.Lock()
+	defer m.spin.Unlock()
 	m.tasks = append(m.tasks, mt)
 	m.cond.Signal()
 
@@ -145,7 +160,6 @@ func (m *MTask) run() {
 	go func() {
 		defer func() {
 			m.p.decRunnins()
-			m.p.p.Put(m)
 			if err := recover(); err != nil {
 				if m.p.PanicHandle == nil {
 					panic(err)
@@ -156,6 +170,10 @@ func (m *MTask) run() {
 		}()
 
 		for task := range m.mt {
+			if task == nil {
+				return
+			}
+
 			task()
 
 			if !m.p.insert(m) {
@@ -165,18 +183,12 @@ func (m *MTask) run() {
 	}()
 }
 
-func (m *MPool) Close() error {
-	m.once.Do(func() {
-		m.setStatus(RUNNING, STOPED)
-		for i := range m.tasks {
-			for len(m.tasks[i].mt) > 0 {
-				time.Sleep(1e6)
-			}
-			close(m.tasks[i].mt)
-			m.tasks[i] = nil
-		}
-		m.tasks = nil
-	})
+func (m *MPool) Stop() {
+	m.setStatus(RUNNING, STOPED)
 
-	return nil
+	for i := range m.tasks {
+		m.tasks[i].mt <- nil
+		m.tasks[i] = nil
+	}
+	m.tasks = nil
 }

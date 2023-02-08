@@ -1,57 +1,111 @@
 package molix
 
 import (
-	"context"
-	"io"
-	"net/http"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
 )
 
-var (
-	client = &http.Client{}
+const (
+	_   = 1 << (10 * iota)
+	KiB // 1024
+	MiB // 1048576
 )
+
+const (
+	n = 1e5
+	t = 10
+)
+
+var curMem uint64
+
+func demoFunc() {
+	time.Sleep(time.Duration(t) * time.Millisecond)
+}
+
+func TestGoroutines(t *testing.T) {
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			demoFunc()
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+	mem := runtime.MemStats{}
+	runtime.ReadMemStats(&mem)
+	curMem = mem.TotalAlloc/MiB - curMem
+	t.Logf("memory usage:%d MB", curMem)
+}
+
+func TestMolix(t *testing.T) {
+	var g sync.WaitGroup
+	defer Stop()
+	for i := 0; i < n; i++ {
+		g.Add(1)
+		Submit(func() {
+			demoFunc()
+			g.Done()
+		})
+	}
+	g.Wait()
+	t.Logf("pool MTask capacity %d", Cap())
+	t.Logf("pool running task %d", Running())
+	t.Logf("pool free task %d", Free())
+	mem := runtime.MemStats{}
+	runtime.ReadMemStats(&mem)
+	curMem = mem.TotalAlloc/MiB - curMem
+	t.Logf("memory usage:%d MB", curMem)
+}
 
 func BenchmarkGoroutines(b *testing.B) {
 	var g sync.WaitGroup
 	for i := 0; i < b.N; i++ {
-		g.Add(1)
-		go test(&g)
+		g.Add(n)
+		for i := 0; i < n; i++ {
+			go func() {
+				demoFunc()
+				g.Done()
+			}()
+		}
+		g.Wait()
 	}
-	g.Wait()
 }
 
-func BenchmarkMyPool(b *testing.B) {
+func BenchmarkMolix(b *testing.B) {
 	var g sync.WaitGroup
-	m, _ := NewMPool(defaultSize)
+	mp, _ := NewMPool(5e4)
+	defer mp.Stop()
 	for i := 0; i < b.N; i++ {
-		g.Add(1)
-		if err := m.Submit(func() { test(&g) }); err != nil {
-			b.Log(err)
+		g.Add(n)
+		for i := 0; i < n; i++ {
+			mp.Submit(func() {
+				demoFunc()
+				g.Done()
+			})
+		}
+		g.Wait()
+	}
+}
+
+func BenchmarkGoroutinesThroughput(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		for i := 0; i < n; i++ {
+			go demoFunc()
 		}
 	}
-	g.Wait()
-	b.Log(m.GetRunnings())
-	m.Close()
 }
 
-func test(g *sync.WaitGroup) {
-	defer g.Done()
-	req, _ := http.NewRequest("GET", "http://127.0.0.1:2017", nil)
+func BenchmarkMolixThroughput(b *testing.B) {
+	defer Stop()
 
-	ctx, cannel := context.WithTimeout(context.Background(), time.Second*3)
-	defer cannel()
-	req = req.WithContext(ctx)
-
-	rsp, err := client.Do(req)
-	if err != nil {
-		return
-	}
-
-	io.ReadAll(rsp.Body)
-
-	if err := rsp.Body.Close(); err != nil {
-		return
+	for i := 0; i < b.N; i++ {
+		for i := 0; i < n; i++ {
+			Submit(func() {
+				demoFunc()
+			})
+		}
 	}
 }

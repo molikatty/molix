@@ -14,14 +14,18 @@ func Submit(t func()) error {
 	return defaultMolixPool.Submit(t)
 }
 
-func Close() error {
-	return defaultMolixPool.Close()
+func Stop() {
+	defaultMolixPool.Stop()
 }
 
 func Running() int {
-	return defaultMolixPool.GetRunnings()
+	return defaultMolixPool.Running()
 }
 
 func Cap() int {
-	return defaultMolixPool.GetCap()
+	return defaultMolixPool.Cap()
+}
+
+func Free() int {
+	return defaultMolixPool.Free()
 }
